@@ -10,7 +10,7 @@ usage = 'usage: %prog [options]'
 parser = OptionParser(usage)
 
 parser.add_option("-m", "--wimpmass", action="store", type="float", default=100., dest="WMASS", help="WIMP Mass")
-parser.add_option("-l", "--velocitylow", action="store", type="float", default=5., dest="VLOW", help="Lowest Velocity Stream")
+parser.add_option("-l", "--velocitylow", action="store", type="float", default=10., dest="VLOW", help="Lowest Velocity Stream")
 parser.add_option("-u", "--velocityhigh", action="store", type="float", default=2000., dest="VHIGH", help="Highest Velocity Stream")
 parser.add_option("-s", "--velocitystep", action="store", type="float", default=30., dest="VSTEP", help="Step Size Velocity Stream")
 
@@ -129,9 +129,9 @@ def CapProb(v, vsesc, mDM, mi=0.938):
     #Qmin = 0.5*mDM*v*v/(C*C)
     #betaplus = 4.*mDM*mi/(mDM+mi)**2.
     #Qmax = 0.5*betaplus*mDM*(v*v + vsesc*vsesc)/(C*C)
-    r = 0.754*np.power(mi, 1./3.)*1.e3/197. # PPPC4DMnu paper paragraph before Eq 14, natural units GeV^-1
+    r = 0.754*np.power(mi, 1./3.)*1.e-15/197.
     E0 = 1.5/(mi*r**2.)
-    def integrand(x):   #Form factor
+    def integrand(x):
         return np.exp(-1.*x/E0)
     integ = integrate.quad(integrand, E*delmin, E*delmax, epsabs = 1e-16, epsrel = 1.e-16, limit=5000, maxp1=5000, limlst=5000)[0]
     #integ = np.max([0, (delmax-delmin)/delmax])
@@ -192,12 +192,12 @@ fout = open(str(wimpmass)+'_Summary.txt', "w")
 fout.write('SMH Capture Rate '+str(smhcaprate)+'\n')
 
 print 'Stream Capture Rates'
-fout.write('Stream Peak Velocity|Stream Capture Rates|Rescaling Factor\n')
+fout.write('Stream Capture Rates\n')
 streamcaprates={}
 for vel in velocities:
     streamcaprates[vel] = 0.3/wimpmass*1.e-36*(integrate.quad(Radintegrand, 0.1, solarradius, (streams[vel],wimpmass))[0] + integrate.quad(Radintegrand, 0.1, solarradius, (streams[vel], wimpmass, 0.938*14., 14))[0])
     print vel, streamcaprates[vel]
-    fout.write(str(vel/C)+'|'+str(streamcaprates[vel])+'|'+str(smhcaprate/streamcaprates[vel])+'\n')
+    fout.write(str(vel)+'|'+str(streamcaprates[vel])+'\n')
 
 fout.close()
 

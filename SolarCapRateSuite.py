@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 from scipy.interpolate import InterpolatedUnivariateSpline
 from optparse import OptionParser
+import dmdd
+
 
 usage = 'usage: %prog [options]'
 parser = OptionParser(usage)
@@ -13,7 +15,7 @@ parser.add_option("-m", "--wimpmass", action="store", type="float", default=100.
 parser.add_option("-l", "--velocitylow", action="store", type="float", default=5., dest="VLOW", help="Lowest Velocity Stream")
 parser.add_option("-u", "--velocityhigh", action="store", type="float", default=2000., dest="VHIGH", help="Highest Velocity Stream")
 parser.add_option("-s", "--velocitystep", action="store", type="float", default=30., dest="VSTEP", help="Step Size Velocity Stream")
-
+parser.add_option("-f", "--formfactor", action = "store", default=0, type='int', dest="FF", help = "0: Use the traditional exponential form factor in energy 1: Use dmdd: https://github.com/veragluscevic/dmdd")
 (options, args) = parser.parse_args()
 
 wimpmass = options.WMASS

@@ -1,3 +1,5 @@
+#This script evaluates Eq (2) of 1506.03386, for both The SMH and the streams
+
 import numpy as np
 import scipy.integrate as integrate
 import sunpy.sun.models as sunmodel
@@ -5,8 +7,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 from scipy.interpolate import InterpolatedUnivariateSpline, interp1d
 from optparse import OptionParser
-
-
+import dmdd
 
 usage = 'usage: %prog [options]'
 parser = OptionParser(usage)
@@ -15,6 +16,10 @@ parser.add_option("-m", "--wimpmass", action="store", type="float", default=100.
 parser.add_option("-l", "--velocitylow", action="store", type="float", default=5., dest="VLOW", help="Lowest Velocity Stream")
 parser.add_option("-u", "--velocityhigh", action="store", type="float", default=30000., dest="VHIGH", help="Highest Velocity Stream")
 parser.add_option("-s", "--velocitysteps", action="store", type="float", default=3000., dest="VSTEP", help="number of velocity steps")
+parser.add_option("-r", "--refine", action = "store_true", default=False, dest="REF", help = "Refine the lower edge")
+parser.add_option("-o", "--optimistic", action = "store", default=0, type='int', dest="OPTIM", help = "0: Use the pessimistic, 1: Use the best fit, 2: Use the optimistic")
+parser.add_option("-f", "--formfactor", action = "store", default=0, type='int', dest="FF", help = "0: Use the traditional exponential form factor in energy 1: Use dmdd: https://github.com/veragluscevic/dmdd")
+
 
 (options, args) = parser.parse_args()
 
@@ -22,6 +27,22 @@ wimpmass = options.WMASS
 vlow = options.VLOW
 vhigh = options.VHIGH
 vstep = options.VSTEP
+
+
+fhead = 'DDOuts/DDS' + str(wimpmass)
+
+#PICO has shared three values of their efficiency as a function of recoil energy. The Optimistic, Pessimistic, and Best fit. It was recommended that the pessimistic one be used as default. But the others may be useful for systematics.
+
+if options.OPTIM==0:
+    ERRTYPE='p'
+    fhead = fhead+'_Pess'
+elif options.OPTIM==1:
+    ERRTYPE='b'
+    fhead = fhead+'_Best'
+elif options.OPTIM==2:
+    ERRTYPE='o'
+    fhead = fhead+'_Opti'
+    
 
 #Load PICO efficiency data, which corresponds to %of threshold as:
 percthresh = np.asarray([0.0, 0.2, 0.5, 0.8, 1.0])
@@ -63,7 +84,7 @@ abundances={}
 abundances['C'] = masses['C']*3./(masses['C']*3. + masses['F']*8.)
 abundances['F'] = masses['F']*8./(masses['C']*3. + masses['F']*8.)
 
-
+#class for a velocity distribution function. Automatically exposes the VDF to different rest frames (Galactic or Solar), with hopefully correct normalizations.
 class VDF(object):
     def __init__(self, vdftype='SMH', vesc=650., k=2.5, vpeak = 230., vsun=233., norm=1., earthvel=30.):
         self.vdftype=vdftype
@@ -100,7 +121,7 @@ class VDF(object):
                     else:
                         return Integrator(v)    
                 self.VelSolarRestFrame = VelSolarRestFrame
-        
+        #The delta function stream 
         elif self.vdftype=='Dirac':
             print 'Constructing Solar Rest frame VDF directly'
             def VelSolarRestFrame(v, vpeak=self.vpeak):
@@ -129,26 +150,32 @@ class VDF(object):
         
 
 
-def VelIntegrand(v, vdf, mdm, mi, cosangle=0):
+def VelIntegrand(v, vdf, mdm, mi, cosangle=0, nuclname='Fluorine'):
     r = 0.754*np.power(mi, 1./3.)*1.e3/197.
     E0 = 1.5/(mi*r**2.)
     def integrand(x):  #Form factor goes in here
-        return np.exp(-1.*x/E0)
+        if not options.FF:
+            return np.exp(-1.*x/E0)
+        else:
+            return dmdd.rate_UV.formUV.factor_SD(nuclname, x, 1.0)
     #E = 0.5*mdm*v*v/C*C
     return 4.*np.pi*vdf.NormalizedV2VelSolarRestFrame(v+cosangle*vdf.earthvel)/v#*integrand(0.5*mdm*(v*v)/(C*C))
 
 
-def RecoilEnergyIntegrand(ER, vdf, mdm, nuc='C', err='b',  cosangle=0):
+def RecoilEnergyIntegrand(ER, vdf, mdm, nuc='C', err='p',  cosangle=0, nuclname='Fluorine'):
     r = 0.754*np.power(masses[nuc], 1./3.)*1.e3/197.
     E0 = 1.5/(masses[nuc]*r**2.)
     def integrand(x):  #Form factor goes in here
-        return np.exp(-1.*x/E0)
+        if not options.FF:
+            return np.exp(-1.*x/E0)
+        else:
+            return dmdd.rate_UV.formUV.factor_SD(nuclname, x, 1.0)
     muM = mdm*masses[nuc]/(mdm + masses[nuc])
     vmin = np.sqrt(masses[nuc]*ER/1.e6/2.)/muM*C
     if vdf.vdftype=='SMH':
         integ = integrate.quad(VelIntegrand, vmin, 5000., (vdf, mdm, masses[nuc]))[0]
         retval = efficiencies[nuc+'_'+err](ER)*abundances[nuc]/masses[nuc]*integ*integrand(ER/1.e6)
-        print nuc, ER, E0 ,retval, vmin
+        #print nuc, ER, E0 ,retval, vmin
         return retval
     elif vdf.vdftype=='Dirac':
         v = vdf.vpeak
@@ -157,7 +184,7 @@ def RecoilEnergyIntegrand(ER, vdf, mdm, nuc='C', err='b',  cosangle=0):
         else:
             integ = 0.
         retval = efficiencies[nuc+'_'+err](ER)*abundances[nuc]/masses[nuc]*integ*integrand(ER/1.e6)#*integrand(0.5*mdm*(v*v)/(C*C))
-        print nuc, ER, E0 ,retval, vmin
+        #print nuc, ER, E0 ,retval, vmin
         return retval
 
 
@@ -168,38 +195,66 @@ norm = smh.integv2solarrestframe
 velocities = np.power(10., np.linspace(np.log10(vlow), np.log10(vhigh), vstep))
 
 streams={}
-
-for vel in velocities:
-    streams[vel] = VDF(vdftype='Dirac', vpeak=vel)
-
-
+if not options.REF:
+    for vel in velocities:
+        streams[vel] = VDF(vdftype='Dirac', vpeak=vel)
 
 
-smhevrate = 0.3/wimpmass*1.e-36*(((integrate.quad(RecoilEnergyIntegrand, 2.5, 500., (smh,wimpmass, 'F')))[0] + (integrate.quad(RecoilEnergyIntegrand, 2.5, 500., (smh,wimpmass, 'C')))[0]) )# + ((integrate.quad(RecoilEnergyIntegrand, 1000., 1000000., (smh,wimpmass, 'F')))[0] + (integrate.quad(RecoilEnergyIntegrand, 1000., 1000000., (smh,wimpmass, 'C')))[0]) +((integrate.quad(RecoilEnergyIntegrand, 1000000., np.inf, (smh,wimpmass, 'F')))[0] + (integrate.quad(RecoilEnergyIntegrand, 1000000., np.inf, (smh,wimpmass, 'C')))[0]))
+
+
+smhevrate = 0.3/wimpmass*1.e-36*(((integrate.quad(RecoilEnergyIntegrand, 2.5, 500., (smh,wimpmass, 'F')))[0]))# + (integrate.quad(RecoilEnergyIntegrand, 2.5, 500., (smh,wimpmass, 'C')))[0]) )# + ((integrate.quad(RecoilEnergyIntegrand, 1000., 1000000., (smh,wimpmass, 'F')))[0] + (integrate.quad(RecoilEnergyIntegrand, 1000., 1000000., (smh,wimpmass, 'C')))[0]) +((integrate.quad(RecoilEnergyIntegrand, 1000000., np.inf, (smh,wimpmass, 'F')))[0] + (integrate.quad(RecoilEnergyIntegrand, 1000000., np.inf, (smh,wimpmass, 'C')))[0]))
 
 print smhevrate
-
-
-fout = open(str(wimpmass)+'_DDSummary.txt', "w")
-fout.write('SMH Event Rate '+str(smhevrate)+'\n')
-
-print 'Stream Event Rates'
-fout.write('Stream Peak Velocity|Stream Event Rates|Rescaling Factor\n')
-        
 streamevrates={}
-for vel in velocities:
-    streamevrates[vel] = 0.3/wimpmass*1.e-36*( (integrate.quad(RecoilEnergyIntegrand, 2.5, 500., (streams[vel],wimpmass, 'F'))[0] + integrate.quad(RecoilEnergyIntegrand, 2.5, 500., (streams[vel], wimpmass, 'C'))[0])) #+ (integrate.quad(RecoilEnergyIntegrand, 1000., 1000000., (streams[vel],wimpmass, 'F'))[0] + integrate.quad(RecoilEnergyIntegrand, 1000., 1000000., (streams[vel], wimpmass, 'C'))[0]) + (integrate.quad(RecoilEnergyIntegrand, 1000000., np.inf, (streams[vel],wimpmass, 'F'))[0] + integrate.quad(RecoilEnergyIntegrand, 1000000., np.inf, (streams[vel], wimpmass, 'C'))[0]) )
-    print vel, streamevrates[vel]
-    if streamevrates[vel]:
-        fout.write(str(vel/C)+'|'+str(streamevrates[vel])+'|'+str(smhevrate/streamevrates[vel])+'\n')
-    else:
-        fout.write(str(vel/C)+'|'+str(streamevrates[vel])+'|'+str(np.nan)+'\n')
+if not options.REF:
+    fout = open(fhead+'_DDSummary.txt', "w")
+    fout.write('SMH Event Rate '+str(smhevrate)+'\n')
 
-fout.close()
+    print 'Stream Event Rates'
+    fout.write('Stream Peak Velocity|Stream Event Rates|Rescaling Factor\n')
+            
+    
+    for vel in velocities:
+        streamevrates[vel] = 0.3/wimpmass*1.e-36*( (integrate.quad(RecoilEnergyIntegrand, 2.5, 500., (streams[vel],wimpmass, 'F'))[0])) #+ integrate.quad(RecoilEnergyIntegrand, 2.5, 500., (streams[vel], wimpmass, 'C'))[0])) #+ (integrate.quad(RecoilEnergyIntegrand, 1000., 1000000., (streams[vel],wimpmass, 'F'))[0] + integrate.quad(RecoilEnergyIntegrand, 1000., 1000000., (streams[vel], wimpmass, 'C'))[0]) + (integrate.quad(RecoilEnergyIntegrand, 1000000., np.inf, (streams[vel],wimpmass, 'F'))[0] + integrate.quad(RecoilEnergyIntegrand, 1000000., np.inf, (streams[vel], wimpmass, 'C'))[0]) )
+        print vel, streamevrates[vel]
+        if streamevrates[vel]:
+            fout.write(str(vel/C)+'|'+str(streamevrates[vel])+'|'+str(smhevrate/streamevrates[vel])+'\n')
+        else:
+            fout.write(str(vel/C)+'|'+str(streamevrates[vel])+'|'+str(np.nan)+'\n')
 
+    fout.close()
 
-
-
+else:
+    fout = open(fhead+'_RefDDSummary.txt', "w")
+    arr = np.genfromtxt(str(wimpmass)+'_DDSummary.txt', skip_header=2, delimiter="|").transpose()
+    dDD = arr[2]
+    dDDx = arr[0]
+    vmin = np.max(dDDx[np.isnan(dDD)])
+    arg = np.argmin(np.absolute(dDDx - vmin))
+    mrat = dDD[arg+1]
+    mvel = dDDx[arg+1]
+    nvel = (mvel + vmin)/2.
+    while True:
+        print 'Doing ', nvel*C
+        nevrate = 0.3/wimpmass*1.e-36*( (integrate.quad(RecoilEnergyIntegrand, 2.5, 500., (VDF(vdftype='Dirac', vpeak=nvel*C),wimpmass, 'F'))[0]))
+        if nevrate:
+            fout.write(str(nvel)+'|'+str(nevrate)+'|'+str(smhevrate/nevrate)+'\n')
+            nvel = (nvel+vmin)/2.
+            nrate = smhevrate/nevrate
+        else:
+            nvel = (nvel+mvel)/2.
+            nrate = np.nan
+        
+        
+        
+        print 'Now', nvel*C, nevrate, nrate
+        
+        if nrate/mrat > 1.e3:
+            break
+        
+    fout.close()
+        
+    
 
 
 

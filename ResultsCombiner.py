@@ -1,10 +1,10 @@
 import numpy as np
 from glob import glob
 import matplotlib.pyplot as plt
-from scipy.interpolate import InterpolatedUnivariateSpline, interp1d
+from scipy.interpolate import InterpolatedUnivariateSpline, interp1d, UnivariateSpline
 from scipy.optimize import fsolve, minimize
 
-nflist = sorted(glob('*_Summary.txt'))
+nflist = sorted(glob('OldOutputs2/*_Summary.txt'))
 flist = sorted(glob('*_DDSummary.txt'))
 
 print flist
@@ -53,7 +53,22 @@ SSDlimitsall={}
 Ssyst={}
 PL={}
 
-
+def HackedInterpolator(x, xvals, yvals):
+    rety = np.zeros(len(x))
+    
+    Df = InterpolatedUnivariateSpline(xvals, yvals, ext=0, k=2)
+    
+    xinrange = x[x>np.min(xvals)]
+    xoutrange = x[x<np.min(xvals)]
+    yinrange = Df(xinrange)
+    m = (np.log10(yinrange[0]) - np.log10(yinrange[1]))/(np.log10(xinrange[0]) - np.log10(xinrange[1]))
+    
+    c = 0.5*(np.log10(yinrange[0]) + np.log10(yinrange[1])) - m*(np.log10(xinrange[0]) + np.log10(xinrange[1]))*0.5
+    youtrange = m*xoutrange + c
+    
+    
+    
+    return np.hstack([youtrange, yinrange])
 
     
     
@@ -102,8 +117,11 @@ def ResultsCombiner(m=100., ch=5, plots=False):
     #print 'DDstreams', ddstreams, ddlims
     
     
-    Df = InterpolatedUnivariateSpline(ddstreams, ddlims, ext=0, k=1)
+    #Df = InterpolatedUnivariateSpline(np.log10(ddstreams), np.log10(ddlims), ext=0, k=1)
     Sf = InterpolatedUnivariateSpline(sstreams, slims, ext=0, k=1)
+    
+    Df = interp1d(np.log10(ddstreams), np.log10(ddlims), kind='linear', fill_value='extrapolate', bounds_error=False)
+
 
     #pint = findIntersection(1.e-3, Df, Sf)
     
@@ -116,14 +134,14 @@ def ResultsCombiner(m=100., ch=5, plots=False):
     #try:
 
     print 'Edges', l, u
-    xs = np.power(10., np.linspace(np.log10(l),np.log10(u), 50000))
+    xs = np.power(10., np.linspace(np.log10(l)-0.5,np.log10(u), 50000))
     
     print np.min(xs), np.max(xs)
     print np.min(ddstreams), np.max(ddstreams)
     print np.min(sstreams), np.max(sstreams)
     
     
-    diffs = np.absolute(Df(xs) - Sf(xs))
+    diffs = np.absolute(np.power(10., Df(np.log10(xs))) - Sf(xs))
 #xs = xs[diffs!=np.nan]
 #diffs = diffs[diffs!=np.nan]
 #print 'Try Now'
@@ -133,9 +151,9 @@ def ResultsCombiner(m=100., ch=5, plots=False):
 
     pint =  xs[np.argmin(diffs)]
     
-    if ch==5:
-        if m != 100:
-            pint = np.min(xs)
+    #if ch==5:
+        #if m != 100:
+            #pint = np.min(xs)
     
     print 'Intersection at', pint
     #except:
@@ -150,10 +168,10 @@ def ResultsCombiner(m=100., ch=5, plots=False):
     ##plt.show()
     
     
-    
+    xddstreams = np.power(10., np.linspace(-4., 0., 401))
     
     plt.figure(1)
-    plt.plot(ddstreams, ddlims, color='red', label='PICO', lw=3)
+    plt.plot(xddstreams, np.power(10.,Df(np.log10(xddstreams))), color='red', label='PICO', lw=3)
     plt.plot(sstreams, slims, color='green', label='IceCube', lw=3)
     if intfound:
         plt.plot([1.e-4, 1.e-1], [Sf(pint), Sf(pint)], color='black', label='Halo VDF Independent', lw=3, ls='--')
@@ -164,7 +182,8 @@ def ResultsCombiner(m=100., ch=5, plots=False):
     plt.legend(loc='best', fontsize=15.)
     plt.ylabel(r"$\sigma^{\mathrm{SD}}_{\chi\mathrm{-}p}$ [cm$^{2}$]", fontsize=20)
     plt.title('WIMP Mass = '+str(m) + ' GeV, ' + legendtxt[ch])
-    plt.savefig('CombinedFigures/' + str(m) +'_'+ str(ch)+'.png')
+    plt.ylim([1.e-43, 1.e-34])
+    plt.savefig('CombinedFigures2/' + str(m) +'_'+ str(ch)+'.png')
     plt.show()
     return pint, Sf(pint)
     
@@ -188,7 +207,7 @@ plt.xscale('log')
 plt.yscale('log')
 plt.axis([5., 3.e3, 5.e-42, 1.e-36])
 plt.legend(loc='best', fontsize=15.)
-plt.savefig('OnlyHI.png')
+plt.savefig('2OnlyHI.png')
 #plt.show()
 
 plt.figure(1)
@@ -203,8 +222,27 @@ plt.xscale('log')
 plt.yscale('log')
 plt.axis([5., 3.e3, 5.e-42, 1.e-36])
 plt.legend(loc='best', fontsize=15.)
-plt.savefig('OnlyHI.png')
+plt.savefig('2HIandSMH.png')
+#plt.show()
+
+plt.figure(2)
+lghand1={}
+for ch in channels:
+    #plt.plot(Smasses[ch], CSsd[ch], label=legendtxt[ch], color=colour[ch], lw=4)
+    plt.plot(Smassesall[ch], SSDlimitsall[ch], color=colour[ch], lw=3, label=legendtxt[ch])
+plt.plot(DDdat[0], DDdat[1], lw=3, color='black')
+plt.xlabel(r"$m_{\chi}$ [GeV]", fontsize=15)
+plt.ylabel(r"$\sigma^{\mathrm{SD}}_{HI}$ [cm$^{2}$]", fontsize=15)
+plt.xscale('log')
+plt.yscale('log')
+plt.axis([5., 3.e3, 5.e-42, 1.e-36])
+plt.legend(loc='best', fontsize=15.)
+plt.savefig('2OnlySMH.png')
 plt.show()
+
+
+
+
     
 #plt.xscale('log')
 #plt.yscale('log')

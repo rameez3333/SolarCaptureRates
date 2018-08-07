@@ -25,6 +25,6 @@ plt.yscale('log')
 plt.xlabel('Stream Peak Velocity', fontsize=15.)
 plt.ylabel('Rescaling Factor', fontsize=15.)
 plt.legend(loc='upper left', ncol=3, fontsize=10.)
-plt.show()
 plt.savefig('BothSummary.png')
+plt.show()
 del plt
